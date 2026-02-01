@@ -2,7 +2,7 @@
 <html lang="zh-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>食安掃描 - AI 營養師</title>
     
     <!-- iOS Web App 設定 -->
@@ -67,20 +67,17 @@
             AlertCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
             Key: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>,
             Plus: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-            Zap: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Zap: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+            HelpCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         };
 
-        const MAX_HISTORY_ITEMS = 10;
+        const MAX_HISTORY_ITEMS = 20; // Increased because thumbnails are smaller now
 
-        // --- Main Component ---
         function FoodDecoder() {
             const [apiKey, setApiKey] = useState('');
             const [showKeyInput, setShowKeyInput] = useState(false);
             const [activeTab, setActiveTab] = useState('scan');
-            
-            // NOTE: Changed from single image to array
             const [images, setImages] = useState([]); 
-            
             const [analyzing, setAnalyzing] = useState(false);
             const [result, setResult] = useState(null);
             const [error, setError] = useState(null);
@@ -91,14 +88,10 @@
             const canvasRef = useRef(null);
             const keyInputRef = useRef(null);
 
-            // Load API Key and History
             useEffect(() => {
                 const storedKey = localStorage.getItem('gemini_api_key');
-                if (storedKey) {
-                    setApiKey(storedKey);
-                } else {
-                    setShowKeyInput(true);
-                }
+                if (storedKey) setApiKey(storedKey);
+                else setShowKeyInput(true);
 
                 try {
                     const savedHistory = localStorage.getItem('foodDecoderHistory');
@@ -108,18 +101,17 @@
                 }
             }, []);
 
-            // Save History
             useEffect(() => {
                 try {
                     localStorage.setItem('foodDecoderHistory', JSON.stringify(history));
                 } catch (e) {
-                    const trimmed = history.slice(0, 2);
+                    console.error("Storage full, removing oldest items");
+                    // Aggressively trim if full
+                    const trimmed = history.slice(0, Math.max(1, history.length - 1));
                     setHistory(trimmed);
-                    localStorage.setItem('foodDecoderHistory', JSON.stringify(trimmed));
                 }
             }, [history]);
 
-            // Save API Key
             const saveApiKey = () => {
                 const key = keyInputRef.current.value.trim();
                 if (key) {
@@ -135,8 +127,8 @@
                 setShowKeyInput(true);
             };
 
-            // Image Compression
-            const resizeImage = (base64Str, maxWidth = 800) => {
+            // Image Compression for API Analysis (High Quality)
+            const resizeImage = (base64Str, maxWidth = 1024) => {
                 return new Promise((resolve) => {
                     const img = new Image();
                     img.src = base64Str;
@@ -152,30 +144,53 @@
                         canvas.height = height;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, width, height);
-                        resolve(canvas.toDataURL('image/jpeg', 0.6)); 
+                        resolve(canvas.toDataURL('image/jpeg', 0.8)); // 80% quality for OCR
                     };
                 });
             };
 
-            // Add Image Helper
+            // Thumbnail Creation for LocalStorage (Low Quality, Small Size)
+            const createThumbnail = (base64Str) => {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.src = base64Str;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const maxWidth = 150; // Tiny thumbnail
+                        let width = img.width;
+                        let height = img.height;
+                        if (width > maxWidth) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.5)); // 50% quality
+                    };
+                });
+            };
+
             const addImages = (newImagesBase64) => {
-                // Prevent adding too many (limit to 5)
                 if (images.length + newImagesBase64.length > 5) {
-                    alert("最多只可以一次過分析 5 張圖！");
+                    setError("最多只可以一次過分析 5 張圖！");
                     return;
                 }
-                setImages(prev => [...prev, ...newImagesBase64]);
-                // Reset result if user adds new images to a finished scan
-                if (result) {
-                   setResult(null); 
+                // Duplicate check
+                const uniqueImages = newImagesBase64.filter(newImg => !images.includes(newImg));
+                if (uniqueImages.length < newImagesBase64.length) {
+                    // Optional: could notify user about duplicates, but silently ignoring is fine for UX
                 }
+                
+                setImages(prev => [...prev, ...uniqueImages]);
+                if (result) setResult(null); 
             };
 
             const removeImage = (index) => {
                 setImages(prev => prev.filter((_, i) => i !== index));
             };
 
-            // Analyze
             const analyzeImages = async () => {
                 if (!apiKey) {
                     setShowKeyInput(true);
@@ -188,7 +203,6 @@
                 setResult(null);
 
                 try {
-                    // Process all images
                     const imageParts = await Promise.all(images.map(async (img) => {
                         const compressedDataUrl = await resizeImage(img);
                         return {
@@ -200,20 +214,23 @@
                     }));
 
                     const prompt = `
-                        你係一個專業而且講嘢好直白嘅香港營養師 AI。請分析呢幾張食品成分表或者營養標示嘅圖片（可能係同一件產品嘅唔同部分，例如正面同背面）。
+                        你係一個專業而且講嘢好直白嘅香港營養師 AI。請分析呢幾張食品成分表或者營養標示嘅圖片。
+                        
                         任務：
-                        1. 識別產品名稱（如果睇得到，睇唔到就根據成分估吓係咩）。
+                        1. 識別產品名稱。
                         2. 搵出成分列表，將複雜嘅化學名詞翻譯成香港人聽得明嘅「白話文」（廣東話）。
                         3. 識別熱量資訊。
-                        4. **識別常見致敏原（例如牛奶、蛋、大豆、堅果、甲殼類、麩質等）。**
-                        5. 俾一個總評：係「優質營養」、「普通食品」定係「熱量/化學陷阱」。
+                        4. 識別常見致敏原。
+                        5. 俾一個總評。
+
+                        **重要：如果圖片太模糊、唔係食物、或者完全搵唔到成分資料，請回傳 "verdictType": "unknown" 並在 "advice" 解釋原因。**
                         
-                        請務必嚴格按照以下 JSON 格式回傳（淨係要 JSON）：
+                        請務必嚴格按照以下 JSON 格式回傳：
                         {
                           "productName": "產品名稱",
-                          "healthScore": 0到100嘅整數,
-                          "verdictTitle": "簡短有力嘅標題 (例如：健身恩物 / 糖份炸彈)",
-                          "verdictType": "good" | "average" | "bad",
+                          "healthScore": 0到100嘅整數 (如無法識別則填 0),
+                          "verdictTitle": "標題 (如無法識別則填 '無法識別')",
+                          "verdictType": "good" | "average" | "bad" | "unknown",
                           "calories": "熱量描述",
                           "allergens": ["致敏原1"] (冇就空陣列),
                           "ingredients": [
@@ -224,12 +241,12 @@
                               "description": "簡短說明"
                             }
                           ],
-                          "advice": "俾消費者嘅總結建議，語氣要似朋友咁直白，用地道廣東話，大約50字。"
+                          "advice": "總結建議或錯誤原因 (約50字)"
                         }
                     `;
 
                     const response = await fetch(
-                        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+                        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
                         {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -246,20 +263,20 @@
                     );
 
                     if (!response.ok) {
-                         if (response.status === 400 || response.status === 403) {
-                             throw new Error("API Key 可能錯咗或者過期，請重設 Key。");
-                         }
-                        throw new Error(`API Error: ${response.statusText}`);
+                         if (response.status === 400 || response.status === 403) throw new Error("API Key 可能錯咗，請檢查設定。");
+                         if (response.status === 503) throw new Error("AI 服務繁忙，請等多陣再試。");
+                        throw new Error(`連線錯誤: ${response.statusText}`);
                     }
 
                     const data = await response.json();
                     const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (!textResponse) throw new Error("AI 冇反應");
+                    if (!textResponse) throw new Error("AI 冇反應，請重試。");
 
                     const cleanJson = textResponse.replace(/```json|```/g, '').trim();
                     const parsedResult = JSON.parse(cleanJson);
                     
-                    const thumbnail = await resizeImage(images[0]); // Use first image as thumbnail
+                    // Create a tiny thumbnail specifically for history storage
+                    const thumbnail = await createThumbnail(images[0]);
 
                     const fullResult = {
                         ...parsedResult,
@@ -273,7 +290,7 @@
 
                 } catch (err) {
                     console.error("Analysis failed:", err);
-                    setError(err.message || "分析唔到，請確保張相清晰。");
+                    setError(err.message || "分析失敗，請確保圖片清晰。");
                 } finally {
                     setAnalyzing(false);
                 }
@@ -284,15 +301,12 @@
                 if (files && files.length > 0) {
                     const newImages = [];
                     let processedCount = 0;
-
                     Array.from(files).forEach(file => {
                         const reader = new FileReader();
                         reader.onloadend = () => {
                             newImages.push(reader.result);
                             processedCount++;
-                            if (processedCount === files.length) {
-                                addImages(newImages);
-                            }
+                            if (processedCount === files.length) addImages(newImages);
                         };
                         reader.readAsDataURL(file);
                     });
@@ -321,10 +335,7 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     const dataUrl = canvas.toDataURL('image/jpeg');
-                    
-                    addImages([dataUrl]); // Add to list
-                    
-                    // Stop Stream and Close Camera immediately for better UX
+                    addImages([dataUrl]);
                     closeCamera();
                 }
             };
@@ -341,9 +352,10 @@
                 const config = {
                     good: { gradient: "from-emerald-500 to-teal-600", bg: "bg-emerald-50", border: "border-emerald-100", text: "text-emerald-800", icon: Icons.CheckCircle, label: "優質之選" },
                     average: { gradient: "from-amber-400 to-orange-500", bg: "bg-amber-50", border: "border-amber-100", text: "text-amber-800", icon: Icons.Info, label: "普通食品" },
-                    bad: { gradient: "from-rose-500 to-pink-600", bg: "bg-rose-50", border: "border-rose-100", text: "text-rose-800", icon: Icons.AlertTriangle, label: "熱量陷阱" }
+                    bad: { gradient: "from-rose-500 to-pink-600", bg: "bg-rose-50", border: "border-rose-100", text: "text-rose-800", icon: Icons.AlertTriangle, label: "熱量陷阱" },
+                    unknown: { gradient: "from-slate-400 to-slate-500", bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600", icon: Icons.HelpCircle, label: "無法識別" }
                 };
-                const current = config[type] || config.average;
+                const current = config[type] || config.unknown;
                 const Icon = current.icon;
 
                 return (
@@ -414,7 +426,7 @@
                     <main className="max-w-md mx-auto min-h-[calc(100vh-140px)]">
                         {activeTab === 'scan' ? (
                             <div className="pb-28">
-                                {/* Staging Area (Images Selected but not analyzed yet, or displaying analysis) */}
+                                {/* Staging Area */}
                                 {images.length > 0 && !analyzing && (
                                     <div className="px-4 pt-6 animate-fade-in">
                                         <div className="flex items-center justify-between mb-2">
@@ -422,7 +434,6 @@
                                             <button onClick={() => setImages([])} className="text-xs text-rose-500 font-bold">清空</button>
                                         </div>
                                         
-                                        {/* Horizontal Image Scroll */}
                                         <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar">
                                             {images.map((img, idx) => (
                                                 <div key={idx} className="relative flex-shrink-0 w-24 h-24 rounded-xl border border-slate-200 shadow-sm overflow-hidden group">
@@ -432,7 +443,6 @@
                                                     </button>
                                                 </div>
                                             ))}
-                                            {/* Add More Button (Mini) */}
                                             {images.length < 5 && (
                                                 <div className="flex-shrink-0 flex flex-col gap-2">
                                                     <button onClick={startCamera} className="w-24 h-[44px] rounded-t-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 active:scale-95 transition-transform">
@@ -446,7 +456,6 @@
                                             )}
                                         </div>
 
-                                        {/* Main Analyze Button */}
                                         {!result && (
                                             <button 
                                                 onClick={analyzeImages}
@@ -459,7 +468,7 @@
                                     </div>
                                 )}
 
-                                {/* Empty State (Only show if no images) */}
+                                {/* Empty State */}
                                 {images.length === 0 && !showCamera && (
                                     <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 animate-fade-in">
                                         <div className="w-full max-w-sm space-y-8">
@@ -512,7 +521,6 @@
                                 {/* Result */}
                                 {result && !analyzing && (
                                     <div className="px-4 pt-4 space-y-6 animate-slide-up">
-                                        {/* Product Name Display */}
                                         <div className="flex items-center gap-3 bg-white/80 backdrop-blur-md p-2 pr-4 rounded-full shadow-sm border border-white w-fit mx-auto mb-2">
                                             <div className="bg-indigo-100 rounded-full p-1">
                                                 <Icons.CheckCircle width="16" height="16" className="text-indigo-600" />
@@ -570,7 +578,11 @@
                                             <div key={item.id} className="group bg-white p-3 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex gap-4" onClick={() => { setResult(item); setImages([item.thumbnail]); setActiveTab('scan'); }}>
                                                 <div className="w-20 h-20 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 relative">
                                                     <img src={item.thumbnail} className="w-full h-full object-cover" alt="History" />
-                                                    <div className={`absolute bottom-0 inset-x-0 h-1 ${item.verdictType === 'good' ? 'bg-emerald-500' : item.verdictType === 'bad' ? 'bg-rose-500' : 'bg-amber-400'}`}></div>
+                                                    <div className={`absolute bottom-0 inset-x-0 h-1 ${
+                                                        item.verdictType === 'good' ? 'bg-emerald-500' : 
+                                                        item.verdictType === 'bad' ? 'bg-rose-500' : 
+                                                        item.verdictType === 'unknown' ? 'bg-slate-400' : 'bg-amber-400'
+                                                    }`}></div>
                                                 </div>
                                                 <div className="flex-1 min-w-0 py-1 flex flex-col justify-between">
                                                     <div>
@@ -578,7 +590,11 @@
                                                         <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{item.advice}</p>
                                                     </div>
                                                     <div className="flex items-center justify-between mt-2">
-                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.verdictType === 'good' ? 'bg-emerald-50 text-emerald-700' : item.verdictType === 'bad' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>{item.healthScore} 分</span>
+                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                                            item.verdictType === 'good' ? 'bg-emerald-50 text-emerald-700' : 
+                                                            item.verdictType === 'bad' ? 'bg-rose-50 text-rose-700' : 
+                                                            item.verdictType === 'unknown' ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-700'
+                                                        }`}>{item.healthScore} 分</span>
                                                         <span className="text-[10px] text-slate-300 font-medium">{new Date(item.timestamp).toLocaleDateString()}</span>
                                                     </div>
                                                 </div>
